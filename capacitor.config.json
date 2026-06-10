@@ -1,0 +1,8 @@
+{
+  "appId": "com.gamepad.controller",
+  "appName": "Gamepad",
+  "webDir": "www",
+  "android": {
+    "allowMixedContent": true
+  }
+}

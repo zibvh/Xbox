@@ -1,0 +1,836 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no, viewport-fit=cover">
+<title>Gamepad Controller</title>
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🎮</text></svg>">
+<style>
+*, *::before, *::after {
+  box-sizing: border-box; margin: 0; padding: 0;
+  -webkit-tap-highlight-color: transparent; user-select: none;
+}
+html, body {
+  width: 100%; height: 100%;
+  background: #0c0c0c;
+  overflow: hidden;
+  touch-action: none;
+  font-family: 'Segoe UI', system-ui, sans-serif;
+}
+
+/* ── Top bar ── */
+#top-bar {
+  position: fixed; top: 0; left: 0; right: 0;
+  height: 32px; z-index: 300;
+  background: #161616;
+  border-bottom: 1px solid #252525;
+  display: flex; align-items: center; gap: 6px;
+  padding: 0 8px;
+}
+.tbar-btn {
+  background: #107C10; color: #fff; border: none;
+  border-radius: 5px; padding: 3px 9px; font-size: 11px;
+  font-weight: 700; cursor: pointer; white-space: nowrap; flex-shrink: 0;
+}
+.tbar-btn:active { filter: brightness(0.8); }
+.tbar-btn.edit-active { background: #c07000; }
+.tbar-btn.danger { background: #8a1a1a; }
+#conn-status {
+  width: 8px; height: 8px; border-radius: 50%;
+  background: #333; flex-shrink: 0; transition: background 0.3s;
+}
+#conn-status.connected { background: #107C10; box-shadow: 0 0 5px #107C10; }
+#conn-status.error { background: #e74c3c; }
+
+/* ── Edit mode hint bar ── */
+#edit-hint {
+  display: none;
+  position: fixed; bottom: 6px; left: 50%; transform: translateX(-50%);
+  background: rgba(200,112,0,0.92); color: #fff;
+  border-radius: 20px; padding: 4px 14px;
+  font-size: 10px; font-weight: 700; letter-spacing: 0.05em;
+  z-index: 300; white-space: nowrap; pointer-events: none;
+}
+body.edit-mode #edit-hint { display: block; }
+
+/* ── Pad canvas ── */
+#pad {
+  position: absolute;
+  top: 32px; left: 0; right: 0; bottom: 0;
+  background: linear-gradient(150deg, #222 0%, #181818 50%, #1e1e1e 100%);
+  border-radius: 0 0 40% 40% / 0 0 28% 28%;
+  overflow: hidden;
+}
+
+/* ── All control groups are absolutely positioned ── */
+.ctrl {
+  position: absolute;
+  touch-action: none;
+  /* scale transform origin = top-left for resize */
+  transform-origin: top left;
+}
+
+/* Edit mode: show drag handles */
+body.edit-mode .ctrl {
+  outline: 1.5px dashed rgba(200,112,0,0.7);
+  border-radius: 6px;
+}
+body.edit-mode .ctrl::after {
+  content: '⤢';
+  position: absolute; bottom: -1px; right: -1px;
+  width: 22px; height: 22px;
+  background: rgba(200,112,0,0.9);
+  color: #fff; font-size: 13px;
+  display: flex; align-items: center; justify-content: center;
+  border-radius: 4px 0 4px 0;
+  cursor: se-resize;
+  z-index: 10;
+  line-height: 22px; text-align: center;
+}
+
+/* ── Generic button ── */
+.btn {
+  display: flex; align-items: center; justify-content: center;
+  cursor: pointer;
+  transition: transform 0.06s, filter 0.06s;
+  touch-action: none;
+}
+.btn.pressed { transform: scale(0.84) !important; filter: brightness(1.5); }
+
+/* ── Triggers ── */
+.trigger {
+  width: 58px; height: 22px;
+  background: #1e1e1e;
+  border-radius: 8px 8px 4px 4px;
+  border: 1px solid #3a3a3a;
+  font-size: 10px; font-weight: 800; color: #888;
+  letter-spacing: 0.06em; position: relative; overflow: hidden;
+  box-shadow: 0 3px 8px rgba(0,0,0,0.6);
+}
+.trigger-fill {
+  position: absolute; left: 0; bottom: 0; width: 0%; height: 100%;
+  background: rgba(16,124,16,0.6); transition: width 0.04s; pointer-events: none;
+}
+.trigger span { position: relative; z-index: 1; }
+
+/* ── Bumpers ── */
+.bumper {
+  width: 58px; height: 26px;
+  background: linear-gradient(180deg, #383838, #272727);
+  border-radius: 5px; border: 1px solid #404040;
+  font-size: 10px; font-weight: 800; color: #bbb;
+  box-shadow: 0 3px 6px rgba(0,0,0,0.5);
+  letter-spacing: 0.05em;
+}
+
+/* ── D-Pad ── */
+.dpad { width: 90px; height: 90px; position: relative; }
+.dpad-btn {
+  position: absolute;
+  background: linear-gradient(135deg, #343434, #242424);
+  border: 1px solid #3e3e3e;
+  display: flex; align-items: center; justify-content: center;
+  color: #999; font-size: 14px;
+  box-shadow: 0 2px 5px rgba(0,0,0,0.5);
+}
+.dpad-btn.pressed { background: #3e3e3e; color: #fff; transform: scale(0.90); }
+.dpad-up    { top:0;    left:30px; width:30px; height:30px; border-radius:5px 5px 0 0; }
+.dpad-down  { bottom:0; left:30px; width:30px; height:30px; border-radius:0 0 5px 5px; }
+.dpad-left  { top:30px; left:0;    width:30px; height:30px; border-radius:5px 0 0 5px; }
+.dpad-right { top:30px; right:0;   width:30px; height:30px; border-radius:0 5px 5px 0; }
+.dpad-center { position:absolute; top:30px; left:30px; width:30px; height:30px; background:#1c1c1c; border:1px solid #2e2e2e; }
+
+/* ── Center cluster ── */
+.center-cluster { display: flex; flex-direction: column; align-items: center; gap: 5px; }
+.center-row { display: flex; gap: 10px; align-items: center; }
+.btn-small {
+  width: 30px; height: 30px; border-radius: 50%;
+  background: #222; border: 1px solid #333;
+  font-size: 11px; color: #777; font-weight: 700;
+  box-shadow: 0 2px 5px rgba(0,0,0,0.5);
+}
+.xbox-btn {
+  width: 40px; height: 40px; border-radius: 50%;
+  background: radial-gradient(circle at 38% 33%, #1c921c, #0b620b);
+  border: 2px solid #107C10; font-size: 18px; font-weight: 900;
+  box-shadow: 0 0 14px rgba(16,124,16,0.45), 0 4px 10px rgba(0,0,0,0.7);
+  color: #a0e8a0;
+}
+.xinput-lbl { font-size: 8px; color: #2a2a2a; font-weight: 700; letter-spacing: 0.08em; }
+
+/* ── Face buttons ── */
+.face { width: 90px; height: 90px; position: relative; }
+.face-btn {
+  position: absolute; width: 30px; height: 30px; border-radius: 50%;
+  display: flex; align-items: center; justify-content: center;
+  font-size: 11px; font-weight: 800;
+  box-shadow: 0 4px 8px rgba(0,0,0,0.7), inset 0 1px 0 rgba(255,255,255,0.18);
+  border: 1px solid rgba(0,0,0,0.5);
+}
+.btn-a { background: #107C10; color: #fff; bottom:0; left:30px; }
+.btn-b { background: #bf3030; color: #fff; top:30px; right:0; }
+.btn-x { background: #1868a0; color: #fff; top:30px; left:0; }
+.btn-y { background: #b88800; color: #fff; top:0; left:30px; }
+
+/* ── Thumbsticks ── */
+.stick-wrap { position: relative; width: 76px; height: 76px; }
+.stick-base {
+  width: 76px; height: 76px; border-radius: 50%;
+  background: radial-gradient(circle at 40% 35%, #1e1e1e, #0e0e0e);
+  border: 2px solid #2e2e2e; position: relative;
+  box-shadow: inset 0 4px 10px rgba(0,0,0,0.9), 0 2px 5px rgba(0,0,0,0.4);
+}
+.stick-thumb {
+  position: absolute; width: 44px; height: 44px; border-radius: 50%;
+  background: radial-gradient(circle at 35% 30%, #4a4a4a, #252525);
+  border: 1px solid #3e3e3e;
+  box-shadow: 0 4px 8px rgba(0,0,0,0.7), inset 0 1px 0 rgba(255,255,255,0.08);
+  top: 50%; left: 50%; transform: translate(-50%, -50%);
+  touch-action: none;
+}
+.stick-label {
+  position: absolute; bottom: -14px; left: 50%; transform: translateX(-50%);
+  font-size: 8px; color: #3a3a3a; font-weight: 700;
+  letter-spacing: 0.05em; white-space: nowrap;
+}
+
+/* Shoulder pair layout */
+.shoulder-pair { display: flex; flex-direction: column; gap: 4px; align-items: center; }
+
+/* Vibration flash */
+@keyframes vibe-flash { 0%,100%{opacity:1} 50%{opacity:0.7} }
+.vibrating { animation: vibe-flash 0.08s 3; }
+</style>
+</head>
+<body>
+
+<!-- Top bar -->
+<div id="top-bar">
+  <div id="conn-status"></div>
+  <button class="tbar-btn scan-btn" id="scan-btn" onclick="openScanner()">📷 Scan QR</button>
+  <button class="tbar-btn" id="manual-btn" onclick="toggleManual()" title="Manual URL entry">⌨</button>
+  <button class="tbar-btn danger" id="disconnect-btn" onclick="disconnect()" style="display:none">✕</button>
+  <button class="tbar-btn edit-active" id="edit-btn" onclick="toggleEdit()">✏️ Edit</button>
+  <button class="tbar-btn danger" id="reset-btn" onclick="resetLayout()" style="display:none">↺ Reset</button>
+  <button class="tbar-btn" id="save-btn" onclick="saveLayout()" style="display:none">💾 Save</button>
+</div>
+
+<!-- Manual URL overlay -->
+<div id="manual-overlay" style="display:none;position:fixed;top:32px;left:0;right:0;z-index:400;
+  background:#161616;border-bottom:1px solid #2a2a2a;padding:6px 8px;display:none;gap:6px;align-items:center;">
+  <input type="text" id="ws-url" placeholder="ws://192.168.x.x:8765"
+    style="flex:1;background:#0e0e0e;border:1px solid #2a2a2a;border-radius:5px;
+           color:#ccc;padding:3px 8px;font-size:11px;">
+  <button class="tbar-btn" onclick="connectManual()">Connect</button>
+</div>
+
+<!-- QR Scanner overlay -->
+<div id="qr-overlay" style="display:none;position:fixed;inset:0;z-index:500;
+  background:#000;flex-direction:column;align-items:center;justify-content:center;">
+  <div style="position:relative;width:min(90vw,90vh);aspect-ratio:1">
+    <video id="qr-video" style="width:100%;height:100%;object-fit:cover;border-radius:12px;" playsinline muted></video>
+    <canvas id="qr-canvas" style="display:none"></canvas>
+    <!-- Viewfinder -->
+    <div style="position:absolute;inset:0;pointer-events:none">
+      <div style="position:absolute;inset:15%;border:2px solid rgba(16,124,16,0.8);border-radius:8px;
+        box-shadow:0 0 0 9999px rgba(0,0,0,0.55)"></div>
+    </div>
+  </div>
+  <p style="color:#888;font-size:12px;margin-top:14px">Point at the QR code in your terminal</p>
+  <button class="tbar-btn danger" onclick="closeScanner()" style="margin-top:10px;padding:6px 18px">Cancel</button>
+</div>
+
+<!-- Pad -->
+<div id="pad">
+
+  <!-- LEFT SHOULDER -->
+  <div class="ctrl" id="ctrl-lshoulder" style="left:8px;top:6px;">
+    <div class="shoulder-pair">
+      <div class="btn trigger" data-trigger="left_trigger">
+        <div class="trigger-fill" id="LT-fill"></div><span>LT</span>
+      </div>
+      <div class="btn bumper" data-btn="LB">LB</div>
+    </div>
+  </div>
+
+  <!-- RIGHT SHOULDER -->
+  <div class="ctrl" id="ctrl-rshoulder" style="right:8px;top:6px;">
+    <div class="shoulder-pair">
+      <div class="btn trigger" data-trigger="right_trigger">
+        <div class="trigger-fill" id="RT-fill"></div><span>RT</span>
+      </div>
+      <div class="btn bumper" data-btn="RB">RB</div>
+    </div>
+  </div>
+
+  <!-- D-PAD -->
+  <div class="ctrl" id="ctrl-dpad" style="left:14%;top:50%;transform:translateY(-50%)">
+    <div class="dpad">
+      <div class="btn dpad-btn dpad-up"    data-btn="DPAD_UP">▲</div>
+      <div class="btn dpad-btn dpad-down"  data-btn="DPAD_DOWN">▼</div>
+      <div class="btn dpad-btn dpad-left"  data-btn="DPAD_LEFT">◀</div>
+      <div class="btn dpad-btn dpad-right" data-btn="DPAD_RIGHT">▶</div>
+      <div class="dpad-center"></div>
+    </div>
+  </div>
+
+  <!-- LEFT STICK -->
+  <div class="ctrl" id="ctrl-ls" style="left:5%;bottom:10px;">
+    <div class="stick-wrap">
+      <div class="stick-base" id="ls-base">
+        <div class="stick-thumb" id="ls-thumb"></div>
+      </div>
+      <span class="stick-label">LS</span>
+    </div>
+  </div>
+
+  <!-- CENTER CLUSTER -->
+  <div class="ctrl" id="ctrl-center" style="left:50%;top:8px;transform:translateX(-50%)">
+    <div class="center-cluster">
+      <div class="center-row">
+        <div class="btn btn-small" data-btn="SELECT">⊞</div>
+        <div class="btn xbox-btn"  data-btn="XBOX">🎮</div>
+        <div class="btn btn-small" data-btn="START">☰</div>
+      </div>
+      <div class="xinput-lbl">GAMEPAD</div>
+    </div>
+  </div>
+
+  <!-- FACE BUTTONS -->
+  <div class="ctrl" id="ctrl-face" style="right:14%;top:50%;transform:translateY(-50%)">
+    <div class="face">
+      <div class="btn face-btn btn-y" data-btn="Y">Y</div>
+      <div class="btn face-btn btn-a" data-btn="A">A</div>
+      <div class="btn face-btn btn-b" data-btn="B">B</div>
+      <div class="btn face-btn btn-x" data-btn="X">X</div>
+    </div>
+  </div>
+
+  <!-- RIGHT STICK -->
+  <div class="ctrl" id="ctrl-rs" style="right:5%;bottom:10px;">
+    <div class="stick-wrap">
+      <div class="stick-base" id="rs-base">
+        <div class="stick-thumb" id="rs-thumb"></div>
+      </div>
+      <span class="stick-label">RS</span>
+    </div>
+  </div>
+
+</div>
+
+<!-- Edit hint -->
+<div id="edit-hint">DRAG to move · PINCH or drag ⤢ corner to resize · TAP Save when done</div>
+
+<script>
+// ════════════════════════════════════════════════════════════
+//  LAYOUT SYSTEM
+//  Each .ctrl stores its position as % of pad dimensions
+//  and a scale factor. Saved to localStorage.
+// ════════════════════════════════════════════════════════════
+
+const PAD = document.getElementById('pad');
+const CTRLS = ['ctrl-lshoulder','ctrl-rshoulder','ctrl-dpad','ctrl-ls','ctrl-center','ctrl-face','ctrl-rs'];
+
+// Default layout (percent of pad width/height, scale)
+const DEFAULTS = {
+  'ctrl-lshoulder': { x:1.5,  y:1.5,  s:1 },
+  'ctrl-rshoulder': { x:84,   y:1.5,  s:1 },
+  'ctrl-dpad':      { x:14,   y:30,   s:1 },
+  'ctrl-ls':        { x:5,    y:60,   s:1 },
+  'ctrl-center':    { x:42,   y:1.5,  s:1 },
+  'ctrl-face':      { x:70,   y:30,   s:1 },
+  'ctrl-rs':        { x:80,   y:60,   s:1 },
+};
+
+let layout = {};
+let editMode = false;
+
+function padW() { return PAD.offsetWidth; }
+function padH() { return PAD.offsetHeight; }
+
+function applyLayout() {
+  CTRLS.forEach(id => {
+    const el = document.getElementById(id);
+    const d = layout[id] || DEFAULTS[id];
+    // Remove any CSS transform so we use left/top only
+    el.style.transform = 'none';
+    el.style.right = '';
+    el.style.bottom = '';
+    el.style.left   = d.x + '%';
+    el.style.top    = d.y + '%';
+    el.style.scale  = d.s;
+  });
+}
+
+function saveLayout() {
+  localStorage.setItem('gpad_layout', JSON.stringify(layout));
+  toggleEdit();
+  vib([20, 20, 20]);
+}
+
+function resetLayout() {
+  layout = JSON.parse(JSON.stringify(DEFAULTS));
+  applyLayout();
+  vib([30]);
+}
+
+function loadLayout() {
+  const saved = localStorage.getItem('gpad_layout');
+  if (saved) {
+    try { layout = JSON.parse(saved); } catch { layout = JSON.parse(JSON.stringify(DEFAULTS)); }
+  } else {
+    layout = JSON.parse(JSON.stringify(DEFAULTS));
+  }
+  applyLayout();
+}
+
+// ── Edit mode toggle ──────────────────────────────────────
+function toggleEdit() {
+  editMode = !editMode;
+  document.body.classList.toggle('edit-mode', editMode);
+  document.getElementById('edit-btn').textContent = editMode ? '✅ Done' : '✏️ Edit';
+  document.getElementById('reset-btn').style.display = editMode ? '' : 'none';
+  document.getElementById('save-btn').style.display  = editMode ? '' : 'none';
+  // Disable game input during edit
+  gameInputEnabled = !editMode;
+}
+
+// ── Drag to move ──────────────────────────────────────────
+let dragState = null;
+
+function startDrag(el, clientX, clientY) {
+  if (!editMode) return false;
+  const id = el.id;
+  const rect = el.getBoundingClientRect();
+  const padRect = PAD.getBoundingClientRect();
+  dragState = {
+    el, id,
+    offX: clientX - rect.left,
+    offY: clientY - rect.top,
+    padLeft: padRect.left,
+    padTop:  padRect.top,
+    mode: 'drag'
+  };
+  el.style.zIndex = 50;
+  return true;
+}
+
+function onDragMove(clientX, clientY) {
+  if (!dragState) return;
+  const { el, id, offX, offY, padLeft, padTop, mode } = dragState;
+  const pw = padW(), ph = padH();
+
+  if (mode === 'drag') {
+    let nx = ((clientX - padLeft - offX) / pw) * 100;
+    let ny = ((clientY - padTop  - offY) / ph) * 100;
+    nx = Math.max(0, Math.min(nx, 95));
+    ny = Math.max(0, Math.min(ny, 90));
+    layout[id] = layout[id] || { ...DEFAULTS[id] };
+    layout[id].x = nx;
+    layout[id].y = ny;
+    el.style.left = nx + '%';
+    el.style.top  = ny + '%';
+
+  } else if (mode === 'resize') {
+    // Resize by dragging the corner handle
+    const rect = el.getBoundingClientRect();
+    const padRect = PAD.getBoundingClientRect();
+    const elLeft = parseFloat(el.style.left) / 100 * padW();
+    const elTop  = parseFloat(el.style.top)  / 100 * padH();
+    const newW = clientX - padRect.left - elLeft;
+    const newH = clientY - padRect.top  - elTop;
+    const baseW = dragState.baseW, baseH = dragState.baseH;
+    const scaleX = newW / baseW, scaleY = newH / baseH;
+    const s = Math.max(0.4, Math.min(3.0, (scaleX + scaleY) / 2));
+    layout[id] = layout[id] || { ...DEFAULTS[id] };
+    layout[id].s = s;
+    el.style.scale = s;
+  }
+}
+
+function endDrag() {
+  if (!dragState) return;
+  dragState.el.style.zIndex = '';
+  dragState = null;
+}
+
+// ── Pinch to resize ───────────────────────────────────────
+let pinchState = null;
+
+function pinchDist(t1, t2) {
+  return Math.hypot(t2.clientX - t1.clientX, t2.clientY - t1.clientY);
+}
+
+// ── Touch router ──────────────────────────────────────────
+// Each .ctrl handles its own touchstart; document handles move/end
+
+CTRLS.forEach(id => {
+  const el = document.getElementById(id);
+
+  el.addEventListener('touchstart', e => {
+    if (!editMode) return;
+    e.preventDefault(); e.stopPropagation();
+
+    const touches = e.touches;
+
+    // Check if corner resize handle was touched
+    // The ::after pseudo-element is bottom-right; approximate its area
+    if (touches.length === 1) {
+      const t = touches[0];
+      const rect = el.getBoundingClientRect();
+      const inCorner = (t.clientX > rect.right - 28) && (t.clientY > rect.bottom - 28);
+      if (inCorner) {
+        // Resize mode
+        const baseScale = parseFloat(el.style.scale) || 1;
+        const baseW = el.offsetWidth  * baseScale;
+        const baseH = el.offsetHeight * baseScale;
+        dragState = { el, id, mode: 'resize', baseW, baseH };
+        return;
+      }
+      startDrag(el, t.clientX, t.clientY);
+    }
+
+    if (touches.length === 2) {
+      // Pinch resize
+      endDrag();
+      const d = pinchDist(touches[0], touches[1]);
+      const curS = parseFloat(el.style.scale) || 1;
+      pinchState = { el, id, startDist: d, startScale: curS };
+    }
+  }, { passive: false });
+});
+
+document.addEventListener('touchmove', e => {
+  if (!editMode) return;
+  if (dragState) {
+    e.preventDefault();
+    const t = e.changedTouches[0];
+    onDragMove(t.clientX, t.clientY);
+  }
+  if (pinchState && e.touches.length === 2) {
+    e.preventDefault();
+    const d = pinchDist(e.touches[0], e.touches[1]);
+    const ratio = d / pinchState.startDist;
+    const s = Math.max(0.4, Math.min(3.0, pinchState.startScale * ratio));
+    const { el, id } = pinchState;
+    layout[id] = layout[id] || { ...DEFAULTS[id] };
+    layout[id].s = s;
+    el.style.scale = s;
+  }
+}, { passive: false });
+
+document.addEventListener('touchend', e => {
+  if (!editMode) return;
+  if (e.touches.length < 2) pinchState = null;
+  if (e.touches.length === 0) endDrag();
+});
+
+// Mouse support for desktop testing
+document.addEventListener('mousemove', e => { if (editMode) onDragMove(e.clientX, e.clientY); });
+document.addEventListener('mouseup',   e => { if (editMode) endDrag(); });
+CTRLS.forEach(id => {
+  const el = document.getElementById(id);
+  el.addEventListener('mousedown', e => {
+    if (!editMode) return;
+    e.preventDefault();
+    const rect = el.getBoundingClientRect();
+    const inCorner = (e.clientX > rect.right - 28) && (e.clientY > rect.bottom - 28);
+    if (inCorner) {
+      const baseScale = parseFloat(el.style.scale) || 1;
+      dragState = { el, id, mode:'resize', baseW: el.offsetWidth * baseScale, baseH: el.offsetHeight * baseScale };
+    } else {
+      startDrag(el, e.clientX, e.clientY);
+    }
+  });
+});
+
+
+// ════════════════════════════════════════════════════════════
+//  GAME INPUT
+// ════════════════════════════════════════════════════════════
+let gameInputEnabled = true;
+
+// ── WebSocket ──
+let ws = null, connected = false;
+
+function connect(url) {
+  if (connected) return;
+  ws = new WebSocket(url);
+  ws.onopen = () => {
+    connected = true;
+    document.getElementById('conn-status').className = 'connected';
+    document.getElementById('scan-btn').textContent = '🎮 Connected';
+    document.getElementById('scan-btn').style.background = '#107C10';
+    document.getElementById('disconnect-btn').style.display = '';
+    localStorage.setItem('gpad_url', url);
+    vib([40, 30, 40]);
+  };
+  ws.onclose = () => {
+    connected = false;
+    document.getElementById('conn-status').className = '';
+    document.getElementById('scan-btn').textContent = '📷 Scan QR';
+    document.getElementById('scan-btn').style.background = '';
+    document.getElementById('disconnect-btn').style.display = 'none';
+  };
+  ws.onerror = () => { document.getElementById('conn-status').className = 'error'; };
+  ws.onmessage = e => {
+    try {
+      const msg = JSON.parse(e.data);
+      if (msg.type === 'rumble') {
+        const dur = msg.duration_ms || 150;
+        if (msg.large > 0 || msg.small > 0) {
+          vib([dur]);
+          document.getElementById('pad').classList.add('vibrating');
+          setTimeout(() => document.getElementById('pad').classList.remove('vibrating'), dur + 50);
+        }
+      }
+    } catch {}
+  };
+}
+function disconnect() { ws && ws.close(); }
+function connectManual() {
+  const url = document.getElementById('ws-url').value.trim();
+  if (!url) return;
+  toggleManual(false);
+  connect(url);
+}
+
+// ── Manual URL toggle ──
+let manualOpen = false;
+function toggleManual(force) {
+  manualOpen = force !== undefined ? force : !manualOpen;
+  const el = document.getElementById('manual-overlay');
+  el.style.display = manualOpen ? 'flex' : 'none';
+  if (manualOpen) document.getElementById('ws-url').focus();
+}
+
+// ── QR Scanner ──
+let scanStream = null, scanAnimFrame = null;
+
+async function openScanner() {
+  if (connected) return;
+  const overlay = document.getElementById('qr-overlay');
+  overlay.style.display = 'flex';
+
+  try {
+    scanStream = await navigator.mediaDevices.getUserMedia({
+      video: { facingMode: 'environment', width: { ideal: 1280 }, height: { ideal: 720 } }
+    });
+    const video = document.getElementById('qr-video');
+    video.srcObject = scanStream;
+    await video.play();
+    requestAnimationFrame(scanFrame);
+  } catch (err) {
+    closeScanner();
+    alert('Camera access denied. Use ⌨ to enter URL manually.');
+  }
+}
+
+function closeScanner() {
+  document.getElementById('qr-overlay').style.display = 'none';
+  if (scanStream) { scanStream.getTracks().forEach(t => t.stop()); scanStream = null; }
+  if (scanAnimFrame) { cancelAnimationFrame(scanAnimFrame); scanAnimFrame = null; }
+}
+
+async function scanFrame() {
+  const video  = document.getElementById('qr-video');
+  const canvas = document.getElementById('qr-canvas');
+
+  if (video.readyState < 2) { scanAnimFrame = requestAnimationFrame(scanFrame); return; }
+
+  canvas.width  = video.videoWidth;
+  canvas.height = video.videoHeight;
+  const ctx = canvas.getContext('2d');
+  ctx.drawImage(video, 0, 0);
+  const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+
+  let result = null;
+
+  // Try BarcodeDetector first (fast, native)
+  if (window.BarcodeDetector) {
+    try {
+      const bd = new BarcodeDetector({ formats: ['qr_code'] });
+      const codes = await bd.detect(canvas);
+      if (codes.length) result = codes[0].rawValue;
+    } catch {}
+  }
+
+  // Fall back to jsQR
+  if (!result && window.jsQR) {
+    const code = jsQR(imageData.data, imageData.width, imageData.height, { inversionAttempts: 'dontInvert' });
+    if (code) result = code.data;
+  }
+
+  if (result && result.startsWith('ws://')) {
+    vib([30, 20, 60]);
+    closeScanner();
+    document.getElementById('ws-url').value = result;
+    connect(result);
+    return;
+  }
+
+  scanAnimFrame = requestAnimationFrame(scanFrame);
+}
+
+// Load jsQR lazily when scanner opens (tiny lib, ~30 KB)
+(function loadJsQR() {
+  const s = document.createElement('script');
+  s.src = 'https://cdnjs.cloudflare.com/ajax/libs/jsQR/1.4.0/jsQR.min.js';
+  document.head.appendChild(s);
+})();
+function send(msg) {
+  if (!gameInputEnabled) return;
+  if (ws && ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify(msg));
+}
+function vib(p) { navigator.vibrate && navigator.vibrate(p); }
+
+// ── Digital buttons ──
+document.querySelectorAll('.btn[data-btn]').forEach(el => {
+  const btn = el.dataset.btn;
+  const down = e => {
+    if (!gameInputEnabled) return;
+    e.preventDefault(); e.stopPropagation();
+    el.classList.add('pressed'); vib([15]);
+    send({ type: 'button_down', button: btn });
+  };
+  const up = e => {
+    if (!gameInputEnabled) return;
+    e.preventDefault(); e.stopPropagation();
+    el.classList.remove('pressed');
+    send({ type: 'button_up', button: btn });
+  };
+  el.addEventListener('touchstart',  down, { passive: false });
+  el.addEventListener('touchend',    up,   { passive: false });
+  el.addEventListener('touchcancel', up,   { passive: false });
+  el.addEventListener('mousedown',   down);
+  el.addEventListener('mouseup',     up);
+});
+
+// ── Analog Triggers ──
+document.querySelectorAll('.btn[data-trigger]').forEach(el => {
+  const trigType = el.dataset.trigger;
+  const fill = el.querySelector('.trigger-fill');
+  let iv = null, value = 0;
+  const ramp = () => {
+    iv = setInterval(() => {
+      value = Math.min(1.0, value + 0.12);
+      fill.style.width = (value * 100) + '%';
+      send({ type: trigType, value });
+    }, 25);
+  };
+  const release = () => {
+    clearInterval(iv); iv = null; value = 0;
+    fill.style.width = '0%'; send({ type: trigType, value: 0 });
+  };
+  el.addEventListener('touchstart',  e => { if (!gameInputEnabled) return; e.preventDefault(); vib([15]); ramp(); }, { passive: false });
+  el.addEventListener('touchend',    e => { if (!gameInputEnabled) return; e.preventDefault(); release(); }, { passive: false });
+  el.addEventListener('touchcancel', e => { if (!gameInputEnabled) return; e.preventDefault(); release(); }, { passive: false });
+  el.addEventListener('mousedown',   () => { if (!gameInputEnabled) return; ramp(); });
+  el.addEventListener('mouseup',     () => { if (!gameInputEnabled) return; release(); });
+});
+
+// ── Thumbsticks ──
+function setupStick(thumbId, baseId, stickType) {
+  const thumb = document.getElementById(thumbId);
+  const base  = document.getElementById(baseId);
+  const MAX   = 18;
+  // Track the specific touch identifier so we only respond to OUR finger
+  let activeTouchId = null, ox = 0, oy = 0;
+  let lastVibDist = 0; // for haptic tick on movement
+
+  const center = () => {
+    const r = base.getBoundingClientRect();
+    return { cx: r.left + r.width / 2, cy: r.top + r.height / 2 };
+  };
+  const move = (px, py) => {
+    const { cx, cy } = center();
+    let dx = px - cx, dy = py - cy;
+    const d = Math.hypot(dx, dy);
+    if (d > MAX) { dx = dx/d*MAX; dy = dy/d*MAX; }
+    thumb.style.transform = `translate(calc(-50% + ${dx}px), calc(-50% + ${dy}px))`;
+    send({ type: stickType, x: dx/MAX, y: dy/MAX });
+    // Haptic tick every ~25% of MAX travel, and when crossing back to center
+    const normD = d / MAX;
+    const bucket = Math.floor(normD * 4);
+    const lastBucket = Math.floor(lastVibDist * 4);
+    if (bucket !== lastBucket) vib([6]);
+    lastVibDist = normD;
+  };
+  const reset = (rx, ry) => {
+    activeTouchId = null;
+    lastVibDist = 0;
+    thumb.style.transform = 'translate(-50%, -50%)';
+    send({ type: stickType, x: 0, y: 0 });
+    if (rx !== undefined && Math.hypot(rx-ox, ry-oy) < 6) {
+      // Tap on stick = click it in
+      vib([20]);
+      const btn = stickType === 'left_stick' ? 'LS' : 'RS';
+      send({ type: 'button_down', button: btn });
+      setTimeout(() => send({ type: 'button_up', button: btn }), 80);
+    }
+  };
+
+  thumb.addEventListener('touchstart', e => {
+    if (!gameInputEnabled) return;
+    e.preventDefault(); e.stopPropagation();
+    // Only grab the first touch that hits the thumb
+    if (activeTouchId !== null) return;
+    const t = e.changedTouches[0];
+    activeTouchId = t.identifier;
+    ox = t.clientX; oy = t.clientY;
+    vib([12]);
+  }, { passive: false });
+
+  // Track OUR touch by identifier — ignore all other fingers
+  document.addEventListener('touchmove', e => {
+    if (activeTouchId === null || !gameInputEnabled) return;
+    for (const t of e.changedTouches) {
+      if (t.identifier === activeTouchId) {
+        move(t.clientX, t.clientY);
+        break;
+      }
+    }
+  }, { passive: false });
+
+  document.addEventListener('touchend', e => {
+    if (activeTouchId === null || !gameInputEnabled) return;
+    for (const t of e.changedTouches) {
+      if (t.identifier === activeTouchId) {
+        reset(t.clientX, t.clientY);
+        break;
+      }
+    }
+  }, { passive: false });
+
+  document.addEventListener('touchcancel', e => {
+    if (activeTouchId === null) return;
+    for (const t of e.changedTouches) {
+      if (t.identifier === activeTouchId) { reset(); break; }
+    }
+  }, { passive: false });
+
+  thumb.addEventListener('mousedown', e => { if (!gameInputEnabled) return; activeTouchId = 'mouse'; ox=e.clientX; oy=e.clientY; });
+  document.addEventListener('mousemove', e => { if (activeTouchId === 'mouse' && gameInputEnabled) move(e.clientX, e.clientY); });
+  document.addEventListener('mouseup', e => { if (activeTouchId === 'mouse' && gameInputEnabled) reset(e.clientX, e.clientY); });
+}
+
+setupStick('ls-thumb', 'ls-base', 'left_stick');
+setupStick('rs-thumb', 'rs-base', 'right_stick');
+
+// Block scroll
+document.addEventListener('touchmove', e => e.preventDefault(), { passive: false });
+
+// Auto-reconnect last URL
+const savedUrl = localStorage.getItem('gpad_url');
+if (savedUrl) document.getElementById('ws-url').value = savedUrl;
+
+// Lock landscape
+if (screen.orientation && screen.orientation.lock) {
+  screen.orientation.lock('landscape').catch(() => {});
+}
+
+// Init layout
+loadLayout();
+</script>
+</body>
+</html>
